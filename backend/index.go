@@ -66,10 +66,13 @@ func judgePosition(client *openai.Client, positionInfo, userPrompt string) (stri
 type TaskFunc func(interface{}) interface{}
 
 // 并行执行任务
+// 并行执行任务
+// 并行执行任务
 func ParallelTasks(data []interface{}, concurrency int, task TaskFunc, progress func(int)) []interface{} {
 	var wg sync.WaitGroup
 	results := make([]interface{}, len(data))
-	taskChan := make(chan int, concurrency) // 控制并发数
+	taskChan := make(chan int, concurrency)   // 控制并发数
+	progressChan := make(chan int, len(data)) // 用于按顺序更新进度
 
 	// 启动任务 Goroutine
 	for i, item := range data {
@@ -78,12 +81,23 @@ func ParallelTasks(data []interface{}, concurrency int, task TaskFunc, progress 
 		go func(i int, item interface{}) {
 			defer wg.Done()
 			results[i] = task(item) // 执行任务
-			progress(i + 1)         // 更新进度
+			progressChan <- i + 1   // 发送进度到通道
 			<-taskChan              // 释放并发槽
 		}(i, item)
 	}
 
+	// 启动一个单独的 Goroutine 来处理进度更新
+	go func() {
+		processed := 0
+		for p := range progressChan {
+			fmt.Print(p)
+			processed++
+			progress(processed) // 按顺序更新进度
+		}
+	}()
+
 	wg.Wait()
+	close(progressChan) // 关闭进度通道
 	return results
 }
 
@@ -164,7 +178,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 并发处理任务
-	results := ParallelTasks(data, 30, task, progress)
+	results := ParallelTasks(data, 10, task, progress)
 
 	// 分类结果
 	qualified := make([]string, 0)
