@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/openai/openai-go"
@@ -30,52 +30,49 @@ func initClient() *openai.Client {
 	return client
 }
 
-func judgePosition(client *openai.Client, positionInfo, userPrompt string) (string, error) {
-	// 模拟一个耗时任务，例如处理时间为 500ms
-	time.Sleep(1000 * time.Millisecond)
-
-	// 固定返回 "符合要求"
-	return "符合要求", nil
-}
-
 // func judgePosition(client *openai.Client, positionInfo, userPrompt string) (string, error) {
-// 	systemPrompt := `
-// 	你需要根据用户的描述，判断他是否符合某个职位的要求。
+// 	// 模拟一个耗时任务，例如处理时间为 500ms
+// 	time.Sleep(1000 * time.Millisecond)
 
-// 	职位信息一般包括以下字段：
-// 	招考单位,单位代码,招考职位,职位代码,职位简介,职位类型,录用人数,学历,学位,"研究生专业
-// 	名称及代码","本科专业名称及代码","大专专业名称及代码",是否要求2年以上基层工作经历,是否限应届毕业生报考,其他要求,考区。
-
-// 	1.请务必注意专业对口。
-// 	2.请注意研究生专业和本科专业
-// 	3.有的是大类，比如理学是包括了物理学的,不要漏掉
-// 	4.当你看到某一条专业好像符合的话，要特别小心，不一定就是专业符合的，也要看它是研究生还是本科
-
-// 	IMPORTANT! You only need to return '符合要求' or '不符合要求' or '不确定' , dont need to say anything else
-// 	`
-
-// 	messages := []openai.ChatCompletionMessageParamUnion{
-// 		openai.SystemMessage(systemPrompt),
-// 		openai.UserMessage(fmt.Sprintf("Position Info: %s\nUser Prompt: %s", positionInfo, userPrompt)),
-// 	}
-
-// 	resp, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
-// 		Messages: openai.F(messages),
-// 		Model:    openai.F("deepseek-chat"),
-// 	})
-// 	if err != nil {
-// 		log.Printf("调用 OpenAI API 失败: %v\n", err)
-// 		return "", err
-// 	}
-// 	return resp.Choices[0].Message.Content, nil
+// 	// 固定返回 "符合要求"
+// 	return "符合要求", nil
 // }
+
+func judgePosition(client *openai.Client, positionInfo, userPrompt string) (string, error) {
+	systemPrompt := `
+	你需要根据用户的描述，判断他是否符合某个职位的要求。
+
+	职位信息一般包括以下字段：
+	招考单位,单位代码,招考职位,职位代码,职位简介,职位类型,录用人数,学历,学位,"研究生专业
+	名称及代码","本科专业名称及代码","大专专业名称及代码",是否要求2年以上基层工作经历,是否限应届毕业生报考,其他要求,考区。
+
+	1.请务必注意专业对口。
+	2.请注意研究生专业和本科专业
+	3.有的是大类，比如理学是包括了物理学的,不要漏掉
+	4.当你看到某一条专业好像符合的话，要特别小心，不一定就是专业符合的，也要看它是研究生还是本科
+
+	IMPORTANT! You only need to return '符合要求' or '不符合要求' or '不确定' , dont need to say anything else
+	`
+
+	messages := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage(systemPrompt),
+		openai.UserMessage(fmt.Sprintf("Position Info: %s\nUser Prompt: %s", positionInfo, userPrompt)),
+	}
+
+	resp, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
+		Messages: openai.F(messages),
+		Model:    openai.F("deepseek-chat"),
+	})
+	if err != nil {
+		log.Printf("调用 OpenAI API 失败: %v\n", err)
+		return "", err
+	}
+	return resp.Choices[0].Message.Content, nil
+}
 
 // 任务函数类型
 type TaskFunc func(interface{}) interface{}
 
-// 并行执行任务
-// 并行执行任务
-// 并行执行任务
 func ParallelTasks(data []interface{}, concurrency int, task TaskFunc, progress func(int)) []interface{} {
 	var wg, wgProgress sync.WaitGroup
 	results := make([]interface{}, len(data))
@@ -91,18 +88,15 @@ func ParallelTasks(data []interface{}, concurrency int, task TaskFunc, progress 
 			taskChan <- i           // 占用一个并发槽
 			results[i] = task(item) // 执行任务
 			progressChan <- i       // 发送任务索引到通道
-			fmt.Print("任务\n")
-			<-taskChan // 释放并发槽
+			<-taskChan              // 释放并发槽
 		}(i, item)
 	}
-	fmt.Print("任务线程已全部创建")
 
 	go func() {
 		processed := 0
 		for range progressChan {
 			func() {
 				defer wgProgress.Done()
-				fmt.Print("进度\n")
 				processed++
 				progress(processed) // 按顺序更新进度
 			}()
@@ -146,7 +140,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 读取职位信息
-	positions, err := readPositions("../test.csv")
+	positions, err := readPositions("../files/xian.csv")
 	if err != nil {
 		log.Printf("读取职位信息失败: %v\n", err)
 		return
@@ -193,8 +187,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 并发处理任务
-	results := ParallelTasks(data, 3, task, progress)
-	fmt.Print("计算完成")
+	results := ParallelTasks(data, 100, task, progress)
 
 	// 分类结果
 	qualified := make([]string, 0)
@@ -224,10 +217,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// 推送最终结果到客户端
 	finalResult := map[string]interface{}{
-		"type":        "result",
-		"qualified":   qualified,
-		"unqualified": unqualified,
-		"uncertain":   uncertain,
+		"type":      "result",
+		"qualified": qualified,
 	}
 
 	if err := conn.WriteJSON(finalResult); err != nil {
