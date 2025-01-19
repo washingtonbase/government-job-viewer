@@ -82,34 +82,33 @@ func ParallelTasks(data []interface{}, concurrency int, task TaskFunc, progress 
 	taskChan := make(chan int, concurrency) // 控制并发数
 	progressChan := make(chan int, 10)      // 用于按顺序更新进度
 
+	// 启动任务 Goroutine
+	for i, item := range data {
+		wg.Add(1)
+		wgProgress.Add(1)
+		go func(i int, item interface{}) {
+			defer wg.Done()
+			taskChan <- i           // 占用一个并发槽
+			results[i] = task(item) // 执行任务
+			progressChan <- i       // 发送任务索引到通道
+			fmt.Print("任务\n")
+			<-taskChan // 释放并发槽
+		}(i, item)
+	}
+	fmt.Print("任务线程已全部创建")
+
 	go func() {
-		fmt.Print("处理线程开始")
 		processed := 0
 		for range progressChan {
 			func() {
 				defer wgProgress.Done()
-				fmt.Print("处理")
+				fmt.Print("进度\n")
 				processed++
 				progress(processed) // 按顺序更新进度
 			}()
 
 		}
 	}()
-
-	// 启动任务 Goroutine
-	for i, item := range data {
-		wg.Add(1)
-		wgProgress.Add(1)
-		taskChan <- i // 占用一个并发槽
-		go func(i int, item interface{}) {
-			defer wg.Done()
-			results[i] = task(item) // 执行任务
-			progressChan <- i       // 发送任务索引到通道
-			fmt.Print("释放")
-			<-taskChan // 释放并发槽
-		}(i, item)
-	}
-	fmt.Print("任务线程已全部创建")
 
 	wg.Wait()
 	wgProgress.Wait()
@@ -194,7 +193,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 并发处理任务
-	results := ParallelTasks(data, 1, task, progress)
+	results := ParallelTasks(data, 3, task, progress)
 	fmt.Print("计算完成")
 
 	// 分类结果
