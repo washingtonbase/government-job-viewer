@@ -32,7 +32,7 @@ func initClient() *openai.Client {
 
 func judgePosition(client *openai.Client, positionInfo, userPrompt string) (string, error) {
 	// 模拟一个耗时任务，例如处理时间为 500ms
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// 固定返回 "符合要求"
 	return "符合要求", nil
@@ -79,8 +79,23 @@ type TaskFunc func(interface{}) interface{}
 func ParallelTasks(data []interface{}, concurrency int, task TaskFunc, progress func(int)) []interface{} {
 	var wg, wgProgress sync.WaitGroup
 	results := make([]interface{}, len(data))
-	taskChan := make(chan int, concurrency)   // 控制并发数
-	progressChan := make(chan int, len(data)) // 用于按顺序更新进度
+	taskChan := make(chan int, concurrency) // 控制并发数
+	progressChan := make(chan int, 10)      // 用于按顺序更新进度
+
+	go func() {
+		fmt.Print("处理线程开始")
+		processed := 0
+		for range progressChan {
+			func() {
+				defer wgProgress.Done()
+				fmt.Print("处理")
+				processed++
+				progress(processed) // 按顺序更新进度
+			}()
+
+		}
+	}()
+
 	// 启动任务 Goroutine
 	for i, item := range data {
 		wg.Add(1)
@@ -94,19 +109,7 @@ func ParallelTasks(data []interface{}, concurrency int, task TaskFunc, progress 
 			<-taskChan // 释放并发槽
 		}(i, item)
 	}
-
-	go func() {
-		processed := 0
-		for range progressChan {
-			func() {
-				defer wgProgress.Done()
-				fmt.Print("处理")
-				processed++
-				progress(processed) // 按顺序更新进度
-			}()
-
-		}
-	}()
+	fmt.Print("任务线程已全部创建")
 
 	wg.Wait()
 	wgProgress.Wait()
@@ -191,7 +194,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 并发处理任务
-	results := ParallelTasks(data, 3, task, progress)
+	results := ParallelTasks(data, 1, task, progress)
 	fmt.Print("计算完成")
 
 	// 分类结果
