@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/openai/openai-go"
@@ -31,36 +31,44 @@ func initClient() *openai.Client {
 }
 
 func judgePosition(client *openai.Client, positionInfo, userPrompt string) (string, error) {
-	systemPrompt := `
-	你需要根据用户的描述，判断他是否符合某个职位的要求。
-	
-	职位信息一般包括以下字段：
-	招考单位,单位代码,招考职位,职位代码,职位简介,职位类型,录用人数,学历,学位,"研究生专业
-	名称及代码","本科专业名称及代码","大专专业名称及代码",是否要求2年以上基层工作经历,是否限应届毕业生报考,其他要求,考区。
-	
-	1.请务必注意专业对口。
-	2.请注意研究生专业和本科专业
-	3.有的是大类，比如理学是包括了物理学的,不要漏掉
-	4.当你看到某一条专业好像符合的话，要特别小心，不一定就是专业符合的，也要看它是研究生还是本科
-	
-	IMPORTANT! You only need to return '符合要求' or '不符合要求' or '不确定' , dont need to say anything else
-	`
+	// 模拟一个耗时任务，例如处理时间为 500ms
+	time.Sleep(100 * time.Millisecond)
 
-	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage(systemPrompt),
-		openai.UserMessage(fmt.Sprintf("Position Info: %s\nUser Prompt: %s", positionInfo, userPrompt)),
-	}
-
-	resp, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
-		Messages: openai.F(messages),
-		Model:    openai.F("deepseek-chat"),
-	})
-	if err != nil {
-		log.Printf("调用 OpenAI API 失败: %v\n", err)
-		return "", err
-	}
-	return resp.Choices[0].Message.Content, nil
+	// 固定返回 "符合要求"
+	return "符合要求", nil
 }
+
+// func judgePosition(client *openai.Client, positionInfo, userPrompt string) (string, error) {
+// 	systemPrompt := `
+// 	你需要根据用户的描述，判断他是否符合某个职位的要求。
+
+// 	职位信息一般包括以下字段：
+// 	招考单位,单位代码,招考职位,职位代码,职位简介,职位类型,录用人数,学历,学位,"研究生专业
+// 	名称及代码","本科专业名称及代码","大专专业名称及代码",是否要求2年以上基层工作经历,是否限应届毕业生报考,其他要求,考区。
+
+// 	1.请务必注意专业对口。
+// 	2.请注意研究生专业和本科专业
+// 	3.有的是大类，比如理学是包括了物理学的,不要漏掉
+// 	4.当你看到某一条专业好像符合的话，要特别小心，不一定就是专业符合的，也要看它是研究生还是本科
+
+// 	IMPORTANT! You only need to return '符合要求' or '不符合要求' or '不确定' , dont need to say anything else
+// 	`
+
+// 	messages := []openai.ChatCompletionMessageParamUnion{
+// 		openai.SystemMessage(systemPrompt),
+// 		openai.UserMessage(fmt.Sprintf("Position Info: %s\nUser Prompt: %s", positionInfo, userPrompt)),
+// 	}
+
+// 	resp, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
+// 		Messages: openai.F(messages),
+// 		Model:    openai.F("deepseek-chat"),
+// 	})
+// 	if err != nil {
+// 		log.Printf("调用 OpenAI API 失败: %v\n", err)
+// 		return "", err
+// 	}
+// 	return resp.Choices[0].Message.Content, nil
+// }
 
 // 任务函数类型
 type TaskFunc func(interface{}) interface{}
@@ -69,41 +77,48 @@ type TaskFunc func(interface{}) interface{}
 // 并行执行任务
 // 并行执行任务
 func ParallelTasks(data []interface{}, concurrency int, task TaskFunc, progress func(int)) []interface{} {
-	var wg sync.WaitGroup
+	var wg, wgProgress sync.WaitGroup
 	results := make([]interface{}, len(data))
 	taskChan := make(chan int, concurrency)   // 控制并发数
 	progressChan := make(chan int, len(data)) // 用于按顺序更新进度
-
 	// 启动任务 Goroutine
 	for i, item := range data {
 		wg.Add(1)
+		wgProgress.Add(1)
 		taskChan <- i // 占用一个并发槽
 		go func(i int, item interface{}) {
 			defer wg.Done()
 			results[i] = task(item) // 执行任务
-			progressChan <- i + 1   // 发送进度到通道
-			<-taskChan              // 释放并发槽
+			progressChan <- i       // 发送任务索引到通道
+			fmt.Print("释放")
+			<-taskChan // 释放并发槽
 		}(i, item)
 	}
 
-	// 启动一个单独的 Goroutine 来处理进度更新
 	go func() {
 		processed := 0
-		for p := range progressChan {
-			fmt.Print(p)
-			processed++
-			progress(processed) // 按顺序更新进度
+		for range progressChan {
+			func() {
+				defer wgProgress.Done()
+				fmt.Print("处理")
+				processed++
+				progress(processed) // 按顺序更新进度
+			}()
+
 		}
 	}()
 
 	wg.Wait()
-	close(progressChan) // 关闭进度通道
+	wgProgress.Wait()
+	close(progressChan)
+
 	return results
 }
 
 var wsMutex sync.Mutex // 全局互斥锁
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+
 	// 升级 HTTP 连接为 WebSocket 连接
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -157,6 +172,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// 定义进度函数
 	progress := func(processed int) {
+		wsMutex.Lock()
+		defer wsMutex.Unlock()
 		total := len(data)
 		progress := processed * 100 / total
 		log.Printf("当前进度: %d%%\n", progress)
@@ -167,10 +184,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			"message": progress,
 		}
 
-		// 加锁保护 WebSocket 写入操作
-		wsMutex.Lock()
-		defer wsMutex.Unlock()
-
 		if err := conn.WriteJSON(progressMessage); err != nil {
 			log.Printf("推送进度失败: %v\n", err)
 			return
@@ -178,7 +191,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 并发处理任务
-	results := ParallelTasks(data, 10, task, progress)
+	results := ParallelTasks(data, 3, task, progress)
+	fmt.Print("计算完成")
 
 	// 分类结果
 	qualified := make([]string, 0)
@@ -213,9 +227,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		"unqualified": unqualified,
 		"uncertain":   uncertain,
 	}
+
 	if err := conn.WriteJSON(finalResult); err != nil {
-		log.Printf("推送最终结果失败: %v\n", err)
+		fmt.Printf("推送最终结果失败: %v\n", err)
 	}
+
 }
 
 func readPositions(filePath string) ([]string, error) {
