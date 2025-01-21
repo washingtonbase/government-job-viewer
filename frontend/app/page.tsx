@@ -40,7 +40,7 @@ export default function DataTableDemo() {
     }
 
     setIsCalculating(true) // 开始计算
-    setProgress(0)
+    setProgress(1) // 初始进度设置为 1%
     setResult(null)
 
     const ws = new WebSocket(SERVER_URL)
@@ -53,7 +53,8 @@ export default function DataTableDemo() {
     ws.onmessage = (event) => {
       const message = JSON.parse(event.data)
       if (message.type === 'progress') {
-        setProgress(message.message)
+        // 确保进度条只能递增
+        setProgress((prevProgress) => Math.max(prevProgress, message.message))
       } else if (message.type === 'result') {
         setResult(JSON.stringify(message.qualified, null, 2))
         setIsCalculating(false) // 计算结束
