@@ -25,7 +25,7 @@ const ArrowUpIcon = ({ size = 16 }: { size?: number }) => {
   )
 }
 
-const SERVER_URL = 'ws://localhost:8080/ws' // WebSocket 服务器地址
+const SERVER_URL = 'wss://func-ccba-whirddnmxd.cn-hangzhou.fcapp.run/ws' // WebSocket 服务器地址
 
 export default function DataTableDemo() {
   const [userPrompt, setUserPrompt] = useState("")
@@ -73,22 +73,22 @@ export default function DataTableDemo() {
   }
 
   return (
-    <div className="w-full p-8">
-      <h1 className="font-bold text-center text-4xl -tracking-tighter pb-[30px]">
+    <div className="pt-8">
+      <h1 className="font-bold text-center text-xl md:text-4xl -tracking-tighter">
         全国公务员省考岗位快捷查询系统
       </h1>
 
-      <div className="w-full flex justify-center">
-        <div className="relative w-fit">
+      <div className="w-full flex justify-center pt-[20px] md:pt-[30px]">
+        <div className="relative w-[90%] md:w-[50%]">
           <Textarea
-            className="min-h-[24px] max-h-[calc(75dvh)] overflow-hidden resize-none rounded-2xl !text-base bg-muted pb-10 dark:border-zinc-700 w-[30rem]"
-            placeholder='描述你的情况, 如: "我是物理系的，只有本科学位，没有基层工作经历， 不是应届生，不是党员， 服务基层项目人员和退役大学生士兵不符合我, 不愿意工作5年。而且我要湛江的岗位"'
+            className="min-h-[200px] md:min-h-[100px] overflow-y-auto rounded-2xl !text-base bg-muted"
+            placeholder='描述你的情况, 如: "我是数学系的，只有本科学位，没有基层工作经历， 不是应届生，不是党员， 服务基层项目人员和退役大学生士兵不符合我, 不愿意5年服务期。而且我要佛山的岗位"'
             value={userPrompt}
             onChange={(e) => setUserPrompt(e.target.value)}
           />
           <div className="absolute bottom-0 right-0 p-2 w-fit flex flex-row justify-end">
             <Button
-              className="rounded-full p-1.5 h-fit border dark:border-zinc-600"
+              className="rounded-full p-1.5 h-fit border"
               onClick={handleSubmit}
             >
               <ArrowUpIcon size={14} />
@@ -101,14 +101,14 @@ export default function DataTableDemo() {
       {isCalculating && (
         <div className="mt-8 text-center flex-grow-0 transition-opacity duration-300">
           <div>进度</div>
-          <Progress value={progress} className="h-2 max-w-[800px] bg-gray-200 rounded-full mx-auto mt-2" />
+          <Progress value={progress} className="h-2 max-w-[90%] md:max-w-[800px] bg-gray-200 rounded-full mx-auto mt-2" />
           <div className="mt-2 text-center">{progress}%</div>
         </div>
       )}
 
       {/* 显示最终结果 */}
       {result && (
-        <div className="mt-8 p-4 bg-gray-100 rounded-lg max-w-[1000px] overflow-scroll mx-auto max-h-[1000px]">
+        <div className="mt-8 p-4 bg-gray-100 rounded-lg max-w-[90%] md:max-w-[800px] overflow-scroll mx-auto max-h-[1000px]">
           <pre>{result}</pre>
         </div>
       )}

@@ -1,0 +1,23 @@
+# 使用官方的 Go 镜像作为基础镜像
+FROM golang
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制项目文件（包括 files 文件夹）
+COPY . .
+
+# 确保 files 文件夹存在
+RUN mkdir -p /app/files
+
+# 复制 files 文件夹到容器中
+COPY files /app/files
+
+# 安装依赖
+RUN go mod download
+
+# 暴露端口
+EXPOSE 8080
+
+# 直接运行 Go 程序
+CMD ["go", "run", "index.go"]

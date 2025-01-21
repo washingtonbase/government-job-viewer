@@ -24,7 +24,7 @@ var upgrader = websocket.Upgrader{
 
 func initClient() *openai.Client {
 	client := openai.NewClient(
-		option.WithAPIKey("sk-b653ec6d51bd49dc9a933723679b81c9"), // 替换为你的 API Key
+		option.WithAPIKey("sk-1572fe9db31944a5bfc0ae665b6f4cac"), // 替换为你的 API Key
 		option.WithBaseURL("https://api.deepseek.com"),
 	)
 	return client
@@ -140,7 +140,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 读取职位信息
-	positions, err := readPositions("../files/xian.csv")
+	positions, err := readPositions("./files/xian.csv")
 	if err != nil {
 		log.Printf("读取职位信息失败: %v\n", err)
 		return
@@ -187,7 +187,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 并发处理任务
-	results := ParallelTasks(data, 100, task, progress)
+	results := ParallelTasks(data, 500, task, progress)
 
 	// 分类结果
 	qualified := make([]string, 0)
@@ -205,13 +205,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 将结果写入 CSV 文件
-	if err := writeResults("../results/qualified.csv", qualified); err != nil {
+	if err := writeResults("./results/qualified.csv", qualified); err != nil {
 		log.Printf("写入符合要求的职位失败: %v\n", err)
 	}
-	if err := writeResults("../results/unqualified.csv", unqualified); err != nil {
+	if err := writeResults("./results/unqualified.csv", unqualified); err != nil {
 		log.Printf("写入不符合要求的职位失败: %v\n", err)
 	}
-	if err := writeResults("../results/uncertain.csv", uncertain); err != nil {
+	if err := writeResults("./results/uncertain.csv", uncertain); err != nil {
 		log.Printf("写入不确定的职位失败: %v\n", err)
 	}
 

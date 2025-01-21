@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed  # 导入并发�
 
 # 初始化 OpenAI 客户端
 client = OpenAI(
-    api_key="your-key",
+    api_key="sk-b653ec6d51bd49dc9a933723679b81c9",
     base_url="https://api.deepseek.com",
 )
 
@@ -15,6 +15,8 @@ def send_messages(messages):
     response = client.chat.completions.create(
         model="deepseek-chat",
         messages=messages,
+        temperature=0,
+        seed=42
     )
     return response.choices[0].message.content
 
@@ -30,6 +32,8 @@ def judge_position(position_info, user_prompt):
     
     1.请务必注意专业对口。
     2.请注意研究生专业和本科专业
+    3.有的是大类，比如理学是包括了物理学的,不要漏掉
+    4.当你看到某一条专业好像符合的话，要特别小心，不一定就是专业符合的，也要看它是研究生还是本科
     
     
     """ + """\n IMPORTANT! You only need to return '符合要求' or '不符合要求' or '不确定' , dont need to say anything else"""
@@ -89,7 +93,7 @@ def process_csv(file_path, user_prompt):
             uncertain_writer.writerow(header)
 
             # 使用 ThreadPoolExecutor 实现多并发
-            with ThreadPoolExecutor(max_workers=500) as executor:  # 设置最大并发数为 10
+            with ThreadPoolExecutor(max_workers=1000) as executor:  # 设置最大并发数为 10
                 futures = [executor.submit(process_row, row, user_prompt, qualified_writer, unqualified_writer, uncertain_writer) for row in reader]
 
                 # 使用 tqdm 显示进度条
@@ -102,24 +106,24 @@ def process_csv(file_path, user_prompt):
     print(f"- 不确定的职位已保存到 '{result_dir}/{file_name}_uncertain.csv'。")
 
 # 示例：用户提示
-user_prompt = "我是计算机系的，只有本科学位，基层工作经历， 不是应届生，不是党员， 服务基层项目人员和退役大学生士兵不符合我"
+user_prompt = "我是物理系的，只有本科学位，没有基层工作经历， 不是应届生，不是党员， 服务基层项目人员和退役大学生士兵不符合我, 不愿意工作5年。而且我要湛江的岗位"
 
 # 处理 CSV 文件
 process_csv("files/xian.csv", user_prompt)
-process_csv("files/xiang.csv", user_prompt)  # 处理另一个文件
-process_csv("files/gongan.csv", user_prompt)
-process_csv("files/jianchayuan.csv", user_prompt)
+# process_csv("files/xiang.csv", user_prompt)  # 处理另一个文件
+# process_csv("files/gongan.csv", user_prompt)
+# process_csv("files/jianchayuan.csv", user_prompt)
 # 测试函数
 def test_judge_position():
     # 示例职位信息
     position_info = (
 """
-广州市政务服务和数据管理局,1160554,基础设施股一级科员,11605542557002 ,从事电子政务外网基础设施建设等工作,综合管理类职位,1,本科,学士,,工学(B08),,否,否,,广州
+始兴县财政局,1060396,始兴县国库支付中心二级主任科员以下,10603962557003 ,从事文稿撰写、宣传报道、综合事务处理等相关工作,综合管理类职位,1,大专以上,不限,不限,不限,不限,否,否,面向“服务基层项目人员和退役大学生士兵”专门职位;录用后需在录用单位工作满5年,韶关
 """
     )
 
     # 用户提示
-    user_prompt = "我是计算机系的，只有本科学位，基层工作经历， 不是应届生，不是党员"
+    user_prompt = "我是物理系的，只有本科学位，基层工作经历， 不是应届生，不是党员,服务基层项目人员和退役大学生士兵不符合我"
 
     # 调用判别函数
     result = judge_position(position_info, user_prompt)
@@ -130,4 +134,4 @@ def test_judge_position():
     print(f"判别结果: {result}")
 
 # 运行测试
-# test_judge_position()
+test_judge_position()
