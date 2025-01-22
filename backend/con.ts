@@ -1,4 +1,4 @@
-const CONCURRENCY = 100; // 并发客户端数量
+const CONCURRENCY = 50; // 并发客户端数量
 const SERVER_URL = 'ws://localhost:8080/ws'; // WebSocket 服务器地址
 const USER_PROMPT = "我是物理系的，只有本科学位，没有基层工作经历， 不是应届生，不是党员， 服务基层项目人员和退役大学生士兵不符合我, 不愿意工作5年。而且我要湛江的岗位";
 

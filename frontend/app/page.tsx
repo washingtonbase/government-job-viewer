@@ -76,14 +76,20 @@ export default function DataTableDemo() {
   return (
     <div className="pt-8">
       <h1 className="font-bold text-center text-xl md:text-4xl -tracking-tighter">
-        全国公务员省考岗位快捷查询系统
+        AI 公务员岗位筛选
       </h1>
 
       <div className="w-full flex justify-center pt-[20px] md:pt-[30px]">
         <div className="relative w-[90%] md:w-[50%]">
           <Textarea
-            className="min-h-[200px] md:min-h-[100px] overflow-y-auto rounded-2xl !text-base bg-muted"
-            placeholder='描述你的情况, 如: "我是数学系的，只有本科学位，没有基层工作经历， 不是应届生，不是党员， 服务基层项目人员和退役大学生士兵不符合我, 不愿意5年服务期。而且我要佛山的岗位"'
+            className="min-h-[220px] md:min-h-[150px] overflow-y-auto rounded-2xl !text-base bg-muted"
+            placeholder={
+`官方的岗位检索系统太过简陋，每个人情况不同，找到符合报名条件的岗位非常麻烦。
+
+不如让 AI 帮你，只需像下面这样描述一下, AI 自动过一遍所有岗位，智能匹配：
+
+如: "我2021年数学本科毕业，群众身份，要个佛山或者肇庆的岗位"
+`}
             value={userPrompt}
             onChange={(e) => setUserPrompt(e.target.value)}
           />

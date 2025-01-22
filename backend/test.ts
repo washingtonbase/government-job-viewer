@@ -17,7 +17,6 @@ socket.onmessage = (event) => {
     if (data.type === 'progress') {
         console.log('当前进度:', data.message);
     } else if (data.type === 'result') {
-        console.log('最终结果:', data);
         socket.close(); // 关闭连接
     }
 };

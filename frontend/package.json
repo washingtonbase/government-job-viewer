@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "devops": "next build && docker build -t gov-index . && docker tag gov-index registry.cn-hongkong.aliyuncs.com/weijohn/gov-index:latest && docker push registry.cn-hongkong.aliyuncs.com/weijohn/gov-index:latest"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.1.3",

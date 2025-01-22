@@ -24,7 +24,7 @@ var upgrader = websocket.Upgrader{
 
 func initClient() *openai.Client {
 	client := openai.NewClient(
-		option.WithAPIKey("sk-1572fe9db31944a5bfc0ae665b6f4cac"), // 替换为你的 API Key
+		option.WithAPIKey("sk-1766ec987bcb407688eb721f03048547"), // 替换为你的 API Key
 		option.WithBaseURL("https://api.deepseek.com"),
 	)
 	return client
@@ -50,6 +50,7 @@ func judgePosition(client *openai.Client, positionInfo, userPrompt string) (stri
 	2.请注意研究生专业和本科专业
 	3.有的是大类，比如理学是包括了物理学的,不要漏掉
 	4.当你看到某一条专业好像符合的话，要特别小心，不一定就是专业符合的，也要看它是研究生还是本科
+	5.你要从用户描述中，推断出他是不是应届生
 
 	IMPORTANT! You only need to return '符合要求' or '不符合要求' or '不确定' , dont need to say anything else
 	`
@@ -187,7 +188,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 并发处理任务
-	results := ParallelTasks(data, 500, task, progress)
+	results := ParallelTasks(data, 100, task, progress)
 
 	// 分类结果
 	qualified := make([]string, 0)

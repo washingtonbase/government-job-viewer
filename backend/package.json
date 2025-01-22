@@ -1,0 +1,8 @@
+{
+	"scripts": {
+		"devops": "docker build -t gov-job . && docker tag gov-job registry.cn-hangzhou.aliyuncs.com/weijohn/gov-job:latest && docker push registry.cn-hangzhou.aliyuncs.com/weijohn/gov-job:latest"
+	},
+	"dependencies": {
+		"eventsource": "^3.0.2"
+	}
+}
