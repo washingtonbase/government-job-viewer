@@ -5,6 +5,9 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useState } from "react"
 import { Progress } from "@/components/ui/progress"
+import { useToast } from "@/hooks/use-toast"
+import { Toaster } from "@/components/ui/toaster"
+
 
 const ArrowUpIcon = ({ size = 16 }: { size?: number }) => {
   return (
@@ -25,13 +28,15 @@ const ArrowUpIcon = ({ size = 16 }: { size?: number }) => {
   )
 }
 
-const SERVER_URL = 'wss://func-ccba-whirddnmxd.cn-hangzhou.fcapp.run/ws' // WebSocket 服务器地址
+// const SERVER_URL = 'wss://func-ccba-whirddnmxd.cn-hangzhou.fcapp.run/ws' // WebSocket 服务器地址
+const SERVER_URL = 'ws://localhost:8080/ws'
 
-export default function DataTableDemo() {
+export default function DataTable() {
   const [userPrompt, setUserPrompt] = useState("")
   const [progress, setProgress] = useState(0)
   const [result, setResult] = useState<string | null>(null)
   const [isCalculating, setIsCalculating] = useState(false) // 新增状态：是否正在计算
+  const { toast } = useToast()
 
   const handleSubmit = () => {
     if (!userPrompt.trim()) {
@@ -46,7 +51,6 @@ export default function DataTableDemo() {
     const ws = new WebSocket(SERVER_URL)
 
     ws.onopen = () => {
-      console.log("WebSocket 连接成功")
       ws.send(JSON.stringify({ user_prompt: userPrompt }))
     }
 
@@ -57,24 +61,45 @@ export default function DataTableDemo() {
         setProgress((prevProgress) => Math.max(prevProgress, message.message))
       } else if (message.type === 'result') {
         setResult(JSON.stringify(message.qualified, null, 2))
-        setIsCalculating(false) // 计算结束
+        setIsCalculating(false)
         ws.close()
+      } else if (message.type === 'error'){
+        toast({
+          variant: "destructive",
+          title: message.error,
+          description: "中途出现错误，但仍有部分结果返回",
+          duration: 20000
+        })
+        setResult(JSON.stringify(message.result, null, 2))
+        setIsCalculating(false)
       }
     }
 
-    ws.onclose = () => {
-      console.log("WebSocket 连接关闭")
+    ws.onclose = (event) => {
+      if (event.code != 1000) {
+        toast({
+          variant: 'destructive',
+          title: '连接断开',
+          description: '通常是由于服务器错误或过载，导致连接断开，计算结果全部丢失，请向作者反映',
+          duration: 20000
+        })
+      }
       setIsCalculating(false) // 计算结束
     }
 
     ws.onerror = (error) => {
-      console.error("WebSocket 连接出错:", error)
+      toast({
+        variant: "destructive",
+        title: "建立网络连接失败",
+        description: '请检查你的网络'
+      })
       setIsCalculating(false) // 计算结束
     }
   }
 
   return (
     <div className="pt-8">
+      <Toaster></Toaster>
       <h1 className="font-bold text-center text-xl md:text-4xl -tracking-tighter">
         AI 公务员岗位筛选
       </h1>
