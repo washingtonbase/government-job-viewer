@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,8 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/gorilla/websocket"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 )
@@ -44,7 +47,7 @@ var keyManager = NewKeyManager([]string{
 	// "a76f1b079de9426da487f4510582e8de.oHIO0mS4n6vcDkiI",
 	// "86840b22-2b87-42a7-b066-95030dc7d511", // 豆包
 	// "441986b8-e91a-4429-9621-9ea8641ccc30",
-	"sk-43437784f4d04795af090b62117aa688", // DeepSeek
+	// "sk-43437784f4d04795af090b62117aa688", // DeepSeek
 	"sk-11157ac1b4c54a399bbaafce1aa9226b",
 }, checkKey)
 
@@ -110,19 +113,67 @@ func (m *KeyManager) ReportUnavailable(key string) {
 	log.Printf("Key %s 被报告为不可用\n", key)
 }
 
-// CheckAndRecoverKeys 检查并恢复不可用的 Key
-func (m *KeyManager) CheckAndRecoverKeys() {
+func (m *KeyManager) KeysHealthCheck() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	for _, key := range m.keys {
-		if !m.status[key] { // 如果 Key 不可用
-			if m.checker(key) { // 检查 Key 是否恢复可用
-				m.status[key] = true // 恢复为可用
-				log.Printf("Key %s 已恢复可用\n", key)
-			}
+		m.status[key] = m.checker(key)
+	}
+}
+
+func (m *KeyManager) AddKey(key string) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	// 如果 Key 已经存在，则不添加
+	for _, k := range m.keys {
+		if k == key {
+			return
 		}
 	}
+
+	// 添加新的 Key 并标记为可用
+	m.keys = append(m.keys, key)
+	m.status[key] = true
+	log.Printf("Key %s 已添加\n", key)
+}
+
+// LoadKeysFromDB 从数据库加载 Key 和状态
+func (m *KeyManager) LoadKeysFromDB(db *sql.DB) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	// 查询数据库中的所有 Key
+	rows, err := db.Query("SELECT key, is_active FROM api_keys")
+	if err != nil {
+		return fmt.Errorf("查询数据库失败: %v", err)
+	}
+	defer rows.Close()
+
+	// 清空当前的 Key 和状态
+	m.keys = []string{}
+	m.status = make(map[string]bool)
+
+	// 遍历查询结果，加载到 KeyManager
+	for rows.Next() {
+		var key string
+		var isActive bool
+		if err := rows.Scan(&key, &isActive); err != nil {
+			return fmt.Errorf("读取数据失败: %v", err)
+		}
+		m.keys = append(m.keys, key)
+		m.status[key] = isActive
+		fmt.Printf("%v \n", key)
+	}
+
+	// 检查遍历过程中是否有错误
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("遍历数据失败: %v", err)
+	}
+
+	log.Println("从数据库加载 Key 成功")
+	return nil
 }
 
 // 检查 Key 是否可用的函数
@@ -149,7 +200,7 @@ func checkKey(key string) bool {
 func initClient() (*openai.Client, string, error) {
 	key, ok := keyManager.GetKey()
 	if !ok {
-		return nil, "", errors.New("所有 API key 都挂了")
+		return nil, "", errors.New("ALL API KEYS FAILED")
 	}
 
 	client := openai.NewClient(
@@ -316,21 +367,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 启动一个 Goroutine 定期检查 Key 状态
-	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				keyManager.CheckAndRecoverKeys()
-			case <-ctx.Done():
-				return // WebSocket 连接关闭时退出
-			}
-		}
-	}()
-
 	// 读取客户端消息
 	_, message, err := conn.ReadMessage()
 	if err != nil {
@@ -338,17 +374,38 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 解析用户提示
+	// 解析用户消息
 	var request struct {
 		UserPrompt string `json:"user_prompt"`
+		APIKey     string `json:"api_key"`
 	}
+
 	if err := json.Unmarshal(message, &request); err != nil {
-		log.Printf("解析用户提示失败: %v\n", err)
+		log.Printf("解析用户消息失败: %v\n", err)
 		return
 	}
 
+	// 如果 api_key 不为空，添加到 KeyManager
+	if request.APIKey != "" {
+		keyManager.AddKey(request.APIKey)
+	}
+
+	key, ok := keyManager.GetKey()
+	if !ok {
+		errorMessage := map[string]interface{}{
+			"type":  "error",
+			"error": "ALL API KEYS FAILED",
+		}
+		if err := conn.WriteJSON(errorMessage); err != nil {
+			log.Printf("推送错误信息失败: %v\n", err)
+		}
+		return
+	} else {
+		fmt.Print(key)
+	}
+
 	// 读取职位信息
-	positions, err := readPositions("./files/test.csv")
+	positions, err := readPositions("./files/xian.csv")
 	if err != nil {
 		log.Printf("读取职位信息失败: %v\n", err)
 		return
@@ -426,7 +483,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 并发处理任务
-	results, err := ParallelTasks(data, 20, task, progress)
+	results, err := ParallelTasks(data, 100, task, progress)
 	if err != nil {
 		error_message := map[string]interface{}{
 			"type":   "error",
@@ -465,13 +522,113 @@ func readPositions(filePath string) ([]string, error) {
 	}
 
 	positions := make([]string, 0)
-	for _, record := range records[1:] { // 跳过表头
+	for _, record := range records { // 跳过表头
 		positions = append(positions, strings.Join(record, ", "))
 	}
 	return positions, nil
 }
 
+func connectDB(user, password, host, port, dbname string) (*sql.DB, error) {
+	connStr := fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=%s sslmode=disable",
+		user, password, dbname, host, port)
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		return nil, fmt.Errorf("无法连接数据库: %v", err)
+	}
+
+	err = db.Ping()
+	if err != nil {
+		return nil, fmt.Errorf("无法 ping 数据库: %v", err)
+	}
+
+	return db, nil
+}
+
+func saveKeysToDB(db *sql.DB, keys []string, status map[string]bool) error {
+	// 开启事务
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("开启事务失败: %v", err)
+	}
+
+	// 插入或更新 Key
+	for _, key := range keys {
+		isActive := status[key]
+		_, err := tx.Exec(`
+			INSERT INTO api_keys (key, is_active)
+			VALUES ($1, $2)
+			ON CONFLICT (key) DO UPDATE
+			SET is_active = EXCLUDED.is_active, updated_at = CURRENT_TIMESTAMP
+		`, key, isActive)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("插入或更新 Key 失败: %v", err)
+		}
+	}
+
+	// 提交事务
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("提交事务失败: %v", err)
+	}
+
+	return nil
+}
+
 func main() {
+	// 加载 .env 文件
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("加载 .env 文件失败: %v", err)
+	}
+
+	// 获取环境变量
+	dbUser := os.Getenv("DB_USER")
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbName := os.Getenv("DB_NAME")
+
+	// 连接数据库
+	db, err := connectDB(dbUser, dbPassword, dbHost, dbPort, dbName)
+	if err != nil {
+		log.Fatalf("数据库连接失败: %v", err)
+	}
+	defer db.Close()
+
+	// 从数据库加载 Key
+	if err := keyManager.LoadKeysFromDB(db); err != nil {
+		log.Fatalf("从数据库加载 Key 失败: %v", err)
+	}
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second) // 每 5 分钟执行一次
+		defer ticker.Stop()
+
+		for range ticker.C {
+			keyManager.mutex.Lock()
+			keys := keyManager.keys
+			status := keyManager.status
+			keyManager.mutex.Unlock()
+
+			err := saveKeysToDB(db, keys, status)
+			if err != nil {
+				log.Printf("存储 API Keys 失败: %v", err)
+			} else {
+				log.Println("API Keys 已存储到数据库")
+			}
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		keyManager.KeysHealthCheck()
+		for range ticker.C {
+			keyManager.KeysHealthCheck()
+		}
+	}()
+
 	// 启动 WebSocket 服务器
 	http.HandleFunc("/ws", handleWebSocket)
 	log.Println("WebSocket 服务器启动，监听 :8080")
