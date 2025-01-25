@@ -1,13 +1,15 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { useState } from "react"
-import { Progress } from "@/components/ui/progress"
-import { useToast } from "@/hooks/use-toast"
-import { Toaster } from "@/components/ui/toaster"
-
+import * as React from "react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { useState } from "react";
+import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/hooks/use-toast";
+import { Toaster } from "@/components/ui/toaster";
+import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { useInitializeApiKey } from "@/lib/atoms";
 
 const ArrowUpIcon = ({ size = 16 }: { size?: number }) => {
   return (
@@ -16,7 +18,7 @@ const ArrowUpIcon = ({ size = 16 }: { size?: number }) => {
       strokeLinejoin="round"
       viewBox="0 0 16 16"
       width={size}
-      style={{ color: 'currentcolor' }}
+      style={{ color: "currentcolor" }}
     >
       <path
         fillRule="evenodd"
@@ -25,81 +27,117 @@ const ArrowUpIcon = ({ size = 16 }: { size?: number }) => {
         fill="currentColor"
       />
     </svg>
-  )
-}
+  );
+};
 
-// const SERVER_URL = 'wss://func-ccba-whirddnmxd.cn-hangzhou.fcapp.run/ws' // WebSocket 服务器地址
-const SERVER_URL = 'ws://localhost:8080/ws'
+const SERVER_URL = "ws://localhost:8080/ws";
 
-export default function DataTable() {
-  const [userPrompt, setUserPrompt] = useState("")
-  const [progress, setProgress] = useState(0)
-  const [result, setResult] = useState<string | null>(null)
-  const [isCalculating, setIsCalculating] = useState(false) // 新增状态：是否正在计算
-  const { toast } = useToast()
+export default function MainPage() {
+  const [api_key, setApiKey] = useInitializeApiKey(); // 初始化 API_KEY
+  const [userPrompt, setUserPrompt] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState<string | null>(null);
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const { toast } = useToast();
 
   const handleSubmit = () => {
     if (!userPrompt.trim()) {
-      alert("请输入你的情况描述")
-      return
+      alert("请输入你的情况描述");
+      return;
     }
 
-    setIsCalculating(true) // 开始计算
-    setProgress(1) // 初始进度设置为 1%
-    setResult(null)
+    setIsCalculating(true);
+    setProgress(1);
+    setResult(null);
 
-    const ws = new WebSocket(SERVER_URL)
+    const ws = new WebSocket(SERVER_URL);
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ user_prompt: userPrompt }))
-    }
+      ws.send(JSON.stringify({ user_prompt: userPrompt, api_key: api_key }));
+    };
 
     ws.onmessage = (event) => {
-      const message = JSON.parse(event.data)
-      if (message.type === 'progress') {
-        // 确保进度条只能递增
-        setProgress((prevProgress) => Math.max(prevProgress, message.message))
-      } else if (message.type === 'result') {
-        setResult(JSON.stringify(message.qualified, null, 2))
-        setIsCalculating(false)
-        ws.close()
-      } else if (message.type === 'error'){
-        toast({
-          variant: "destructive",
-          title: message.error,
-          description: "中途出现错误，但仍有部分结果返回",
-          duration: 20000
-        })
-        setResult(JSON.stringify(message.result, null, 2))
-        setIsCalculating(false)
+      const message = JSON.parse(event.data);
+      if (message.type === "progress") {
+        setProgress((prevProgress) => Math.max(prevProgress, message.message));
+      } else if (message.type === "result") {
+        setResult(JSON.stringify(message.qualified, null, 2));
+        setIsCalculating(false);
+        ws.close();
+      } else if (message.type === "error") {
+        console.log(message.error);
+        if (message.error === "ALL API KEYS FAILED") {
+          setDialogOpen(true);
+        } else {
+          toast({
+            variant: "destructive",
+            title: message.error,
+            description: "中途出现错误，但仍有部分结果返回",
+            duration: 20000,
+          });
+        }
+        setResult(JSON.stringify(message.result, null, 2));
+        setIsCalculating(false);
       }
-    }
+    };
 
     ws.onclose = (event) => {
       if (event.code != 1000) {
         toast({
-          variant: 'destructive',
-          title: '连接断开',
-          description: '通常是由于服务器错误或过载，导致连接断开，计算结果全部丢失，请向作者反映',
-          duration: 20000
-        })
+          variant: "destructive",
+          title: "连接断开",
+          description: "通常是由于服务器错误或过载，导致连接断开，计算结果全部丢失，请向作者反映",
+          duration: 20000,
+        });
       }
-      setIsCalculating(false) // 计算结束
-    }
+      setIsCalculating(false);
+    };
 
-    ws.onerror = (error) => {
+    ws.onerror = () => {
       toast({
         variant: "destructive",
         title: "建立网络连接失败",
-        description: '请检查你的网络'
-      })
-      setIsCalculating(false) // 计算结束
-    }
-  }
+        description: "请检查你的网络",
+      });
+      setIsCalculating(false);
+    };
+  };
+
+  const handleConfirm = () => {
+    localStorage.setItem("API_KEY", api_key);
+    setDialogOpen(false);
+  };
 
   return (
     <div className="pt-8">
-      <Toaster></Toaster>
+      <Dialog open={dialogOpen}>
+        <DialogContent className="sm:max-w-[425px]" dialog_onclick={() => setDialogOpen(false)}>
+          <div className="font-bold text-center">若您要免费使用，则要进行下面步骤</div>
+          <span>请你打开这个网站 </span>
+          <a href="https://platform.deepseek.com" target="_blank" className="text-blue-400">
+            https://platform.deepseek.com
+          </a>
+          <span>注册创建一个 API key，复制粘贴到这里，然后点确定即可继续使用</span>
+
+          <div className="grid gap-4 py-4">
+            <div className="grid items-center gap-4">
+              <Input
+                id="api-key"
+                placeholder="请输入 Key 比如 sk-43437784f4d04795af090b62117aa688"
+                value={api_key as string}
+                onChange={(e) => setApiKey(e.target.value)}
+                className="col-span-3"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={handleConfirm}>确定</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Toaster />
       <h1 className="font-bold text-center text-xl md:text-4xl -tracking-tighter">
         AI 公务员岗位筛选
       </h1>
@@ -109,12 +147,12 @@ export default function DataTable() {
           <Textarea
             className="min-h-[220px] md:min-h-[150px] overflow-y-auto rounded-2xl !text-base bg-muted"
             placeholder={
-`官方的岗位检索系统太过简陋，每个人情况不同，找到符合报名条件的岗位非常麻烦。
+              `官方的岗位检索系统太过简陋，每个人情况不同，找到符合报名条件的岗位非常麻烦。
 
 不如让 AI 帮你，只需像下面这样描述一下, AI 自动过一遍所有岗位，智能匹配：
 
-如: "我2021年数学本科毕业，群众身份，要个佛山或者肇庆的岗位"
-`}
+如: "我2021年数学本科毕业，群众身份，要个佛山或者肇庆的岗位"`
+            }
             value={userPrompt}
             onChange={(e) => setUserPrompt(e.target.value)}
           />
@@ -129,7 +167,6 @@ export default function DataTable() {
         </div>
       </div>
 
-      {/* 条件渲染：只有在计算过程中显示进度条和百分比 */}
       {isCalculating && (
         <div className="mt-8 text-center flex-grow-0 transition-opacity duration-300">
           <div>进度</div>
@@ -138,12 +175,11 @@ export default function DataTable() {
         </div>
       )}
 
-      {/* 显示最终结果 */}
       {result && (
         <div className="mt-8 p-4 bg-gray-100 rounded-lg max-w-[90%] md:max-w-[800px] overflow-scroll mx-auto max-h-[1000px]">
           <pre>{result}</pre>
         </div>
       )}
     </div>
-  )
+  );
 }
