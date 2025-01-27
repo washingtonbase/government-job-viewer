@@ -54,6 +54,9 @@ var keyManager = NewKeyManager([]string{
 // 全局变量：标记当前环境
 var isTestEnv bool = false // true 表示测试环境，false 表示生产环境
 
+// 全局变量：存储职位信息
+var positions []string
+
 // KeyManager 管理一组 API Key
 type KeyManager struct {
 	keys          []string          // 所有 Key
@@ -214,16 +217,6 @@ func initClient() (*openai.Client, string, error) {
 func judgePosition(client *openai.Client, positionInfo, userPrompt string) (string, error) {
 	systemPrompt := `
 	你需要根据用户的描述，判断他是否符合某个职位的要求。
-
-	职位信息一般包括以下字段：
-	招考单位,单位代码,招考职位,职位代码,职位简介,职位类型,录用人数,学历,学位,"研究生专业
-	名称及代码","本科专业名称及代码","大专专业名称及代码",是否要求2年以上基层工作经历,是否限应届毕业生报考,其他要求,考区。
-
-	1.请务必注意专业对口。
-	2.请注意研究生专业和本科专业
-	3.有的是大类，比如理学是包括了物理学的,不要漏掉
-	4.当你看到某一条专业好像符合的话，要特别小心，不一定就是专业符合的，也要看它是研究生还是本科
-	5.你要从用户描述中，推断出他是不是应届生
 
 	IMPORTANT! You only need to return '符合要求' or '不符合要求' or '不确定' , dont need to say anything else
 	`
@@ -404,13 +397,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		fmt.Print(key)
 	}
 
-	// 读取职位信息
-	positions, err := readPositions("./files/xian.csv")
-	if err != nil {
-		log.Printf("读取职位信息失败: %v\n", err)
-		return
-	}
-
 	// 将职位信息转换为 []interface{}
 	data := make([]interface{}, len(positions))
 	for i, position := range positions {
@@ -441,12 +427,12 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		wsMutex.Lock()
 		defer wsMutex.Unlock()
 		total := len(data)
-		progress := processed * 100 / total
 
 		// 推送进度到客户端
 		progressMessage := map[string]interface{}{
-			"type":    "progress",
-			"message": progress,
+			"type":      "progress",
+			"processed": processed,
+			"total":     total,
 		}
 
 		if err := conn.WriteJSON(progressMessage); err != nil {
@@ -481,8 +467,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	}
-
-	// 并发处理任务
 	results, err := ParallelTasks(data, 100, task, progress)
 	if err != nil {
 		error_message := map[string]interface{}{
@@ -511,20 +495,45 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func readPositions(filePath string) ([]string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("无法打开文件: %v", err)
 	}
 	defer file.Close()
 
+	// 创建 CSV 读取器并启用 LazyQuotes
 	reader := csv.NewReader(file)
+	reader.LazyQuotes = true    // 允许未转义的双引号
+	reader.FieldsPerRecord = -1 // 允许每行的字段数量不一致
+
+	// 读取所有记录
 	records, err := reader.ReadAll()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("解析 CSV 文件失败: %v", err)
 	}
 
+	// 获取表头
+	headers := records[0]
+
+	// 生成 JSON 格式的数据
 	positions := make([]string, 0)
-	for _, record := range records { // 跳过表头
-		positions = append(positions, strings.Join(record, ", "))
+	for _, record := range records[1:] { // 跳过表头
+		if len(record) == len(headers) { // 字段数量匹配
+			rowData := make(map[string]string)
+			for i, value := range record {
+				rowData[headers[i]] = value
+			}
+			jsonData, err := json.MarshalIndent(rowData, "", "  ")
+			if err != nil {
+				// 如果 JSON 转换失败，使用原字符串拼接
+				positions = append(positions, strings.Join(record, ", "))
+			} else {
+				positions = append(positions, string(jsonData))
+			}
+		} else {
+			// 字段数量不匹配，使用原字符串拼接
+			positions = append(positions, strings.Join(record, ", "))
+		}
 	}
+
 	return positions, nil
 }
 
@@ -601,8 +610,15 @@ func main() {
 		log.Fatalf("从数据库加载 Key 失败: %v", err)
 	}
 
+	// 在程序启动时读取职位信息
+	positions, err = readPositions("./files/hunan/total.csv")
+	fmt.Print("读取职位表完成")
+	if err != nil {
+		log.Fatalf("读取职位信息失败: %v", err)
+	}
+
 	go func() {
-		ticker := time.NewTicker(5 * time.Second) // 每 5 分钟执行一次
+		ticker := time.NewTicker(5 * time.Minute) // 每 5 分钟执行一次
 		defer ticker.Stop()
 
 		for range ticker.C {
