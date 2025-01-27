@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed  # 导入并发�
 
 # 初始化 OpenAI 客户端
 client = OpenAI(
-    api_key="sk-b653ec6d51bd49dc9a933723679b81c9",
+    api_key="sk-cfdb4341e754486f87a604c05c361c53",
     base_url="https://api.deepseek.com",
 )
 
@@ -93,7 +93,7 @@ def process_csv(file_path, user_prompt):
             uncertain_writer.writerow(header)
 
             # 使用 ThreadPoolExecutor 实现多并发
-            with ThreadPoolExecutor(max_workers=1000) as executor:  # 设置最大并发数为 10
+            with ThreadPoolExecutor(max_workers=50) as executor:  # 设置最大并发数为 10
                 futures = [executor.submit(process_row, row, user_prompt, qualified_writer, unqualified_writer, uncertain_writer) for row in reader]
 
                 # 使用 tqdm 显示进度条
@@ -109,7 +109,7 @@ def process_csv(file_path, user_prompt):
 user_prompt = "我是物理系的，只有本科学位，没有基层工作经历， 不是应届生，不是党员， 服务基层项目人员和退役大学生士兵不符合我, 不愿意工作5年。而且我要湛江的岗位"
 
 # 处理 CSV 文件
-process_csv("files/xian.csv", user_prompt)
+process_csv("backend/files/hunan/total.csv", user_prompt)
 # process_csv("files/xiang.csv", user_prompt)  # 处理另一个文件
 # process_csv("files/gongan.csv", user_prompt)
 # process_csv("files/jianchayuan.csv", user_prompt)

@@ -1,0 +1,404 @@
+package main
+
+import (
+	"context"
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+    "golang.org/x/sync/errgroup"
+    "golang.org/x/sync/semaphore"
+
+	"github.com/gorilla/websocket"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
+)
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+// KeyManager 管理一组 API Key
+type KeyManager struct {
+	keys    []string          // 所有 Key
+	status  map[string]bool   // Key 状态（true: 可用, false: 不可用）
+	mutex   sync.Mutex        // 保护并发访问
+	checker func(string) bool // 检查 Key 是否可用的函数
+}
+
+// NewKeyManager 初始化 Key 管理器
+func NewKeyManager(keys []string, checker func(string) bool) *KeyManager {
+	status := make(map[string]bool)
+	for _, key := range keys {
+		status[key] = true // 初始状态为可用
+	}
+
+	return &KeyManager{
+		keys:    keys,
+		status:  status,
+		checker: checker,
+	}
+}
+
+// GetKey 获取一个可用的 Key
+func (m *KeyManager) GetKey() (string, bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	for _, key := range m.keys {
+		if m.status[key] { // 如果 Key 可用
+			return key, true
+		}
+	}
+	return "", false // 没有可用 Key
+}
+
+// ReportUnavailable 报告 Key 不可用
+func (m *KeyManager) ReportUnavailable(key string) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	m.status[key] = false // 标记为不可用
+	log.Printf("Key %s 被报告为不可用\n", key)
+}
+
+// CheckAndRecoverKeys 检查并恢复不可用的 Key
+func (m *KeyManager) CheckAndRecoverKeys() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	for _, key := range m.keys {
+		if !m.status[key] { // 如果 Key 不可用
+			if m.checker(key) { // 检查 Key 是否恢复可用
+				m.status[key] = true // 恢复为可用
+				log.Printf("Key %s 已恢复可用\n", key)
+			}
+		}
+	}
+}
+
+// 检查 Key 是否可用的函数
+func checkKey(key string) bool {
+	// 使用当前 Key 初始化 OpenAI 客户端
+	client := openai.NewClient(
+		option.WithAPIKey(key),
+		option.WithBaseURL("https://api.deepseek.com"),
+	)
+
+	// 发送测试 Completion 请求
+	_, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
+		Messages: openai.F([]openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage("Test"),
+		}),
+		Model: openai.F("deepseek-chat"),
+	})
+
+	// 判断请求结果
+	if err != nil {
+		log.Printf("Key %s 检查失败: %v\n", key, err)
+		return false // Key 仍然不可用
+	}
+
+	log.Printf("Key %s 检查成功，已恢复可用\n", key)
+	return true // Key 已恢复可用
+}
+
+// 初始化 KeyManager
+var keyManager = NewKeyManager([]string{
+	"sk-key1",
+	"sk-key2",
+	"sk-key3",
+}, checkKey)
+
+// 初始化 OpenAI 客户端
+func initClient() (*openai.Client, string, error) {
+	key, ok := keyManager.GetKey()
+	if !ok {
+		return nil, "", fmt.Errorf("没有可用的 API Key")
+	}
+
+	client := openai.NewClient(
+		option.WithAPIKey(key),
+		option.WithBaseURL("https://api.deepseek.com"),
+	)
+	return client, key, nil
+}
+
+// 判别职位
+func judgePosition(client *openai.Client, positionInfo, userPrompt string) (string, error) {
+	systemPrompt := `
+	你需要根据用户的描述，判断他是否符合某个职位的要求。
+
+	职位信息一般包括以下字段：
+	招考单位,单位代码,招考职位,职位代码,职位简介,职位类型,录用人数,学历,学位,"研究生专业
+	名称及代码","本科专业名称及代码","大专专业名称及代码",是否要求2年以上基层工作经历,是否限应届毕业生报考,其他要求,考区。
+
+	1.请务必注意专业对口。
+	2.请注意研究生专业和本科专业
+	3.有的是大类，比如理学是包括了物理学的,不要漏掉
+	4.当你看到某一条专业好像符合的话，要特别小心，不一定就是专业符合的，也要看它是研究生还是本科
+	5.你要从用户描述中，推断出他是不是应届生
+
+	IMPORTANT! You only need to return '符合要求' or '不符合要求' or '不确定' , dont need to say anything else
+	`
+
+	messages := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage(systemPrompt),
+		openai.UserMessage(fmt.Sprintf("Position Info: %s\nUser Prompt: %s", positionInfo, userPrompt)),
+	}
+
+	resp, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
+		Messages: openai.F(messages),
+		Model:    openai.F("deepseek-chat"),
+	})
+	if resp.Choices[0].Message.Content != "" || err != nil {
+		return "", fmt.Errorf("请求错误")
+	}
+	return positionInfo, nil
+}
+
+// 任务函数类型
+type TaskFunc func(interface{}) (interface{}, error)
+
+/*
+1. 控制并发数
+2. 任何一个任务失败，取消其他任务
+3. 错误也要抛出
+4. 资源回收
+5. 返回已完成的结果
+6. 实时显示进度
+7. 保证任何情况下（无论完成还是错误）结束后，不会有子 routine
+
+todo: 限制传入的 task 一定没有任何子 routine。 最好能通过类型检查实现
+
+todo: ParallelTasks 能否嵌套使用
+
+todo: 让外部可以把 ParallelTasks 取消
+
+todo: 如果我忘记把 progressChan 关闭，进度 routine 就会泄露。 Golang 如何通过静态检查发现这一点
+
+todo: 使用并发安全的 array 来存储 results
+*/
+func ParallelTasks(data []interface{}, concurrency int, task TaskFunc, progress func(int)) ([]interface{}, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wg sync.WaitGroup         // 任务进程
+	var wgProgress sync.WaitGroup // 进度统计进程
+
+	var results []interface{}
+	var arr_lock sync.Mutex
+
+	taskChan := make(chan int, concurrency) // 控制并发数
+	progressChan := make(chan int, len(data))
+
+	// 启动任务 Goroutine
+	for i, item := range data {
+		wg.Add(1)
+		wgProgress.Add(1)
+		go func(i int, item interface{}) {
+			defer wg.Done()
+			// 检查 Context 是否已取消
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			taskChan <- i // 占用一个并发槽
+			res, err := task(item)
+			if err != nil {
+				cancel()
+			}
+
+			arr_lock.Lock()
+			results = append(results, res)
+			arr_lock.Unlock()
+
+			progressChan <- i // 发送任务索引到通道
+			<-taskChan        // 释放并发槽
+		}(i, item)
+	}
+
+	select {
+	case <-ctx.Done():
+		return results, fmt.Errorf("中途遇到错误，部分任务已取消")
+	default:
+	}
+
+	// 启动进度更新 Goroutine
+	go func() {
+		processed := 0
+		for range progressChan {
+			func() {
+				defer wgProgress.Done()
+				processed++
+				progress(processed) // 按顺序更新进度
+			}()
+		}
+	}()
+
+	// 等待所有任务完成
+	wg.Wait()
+	wgProgress.Wait()
+
+	// 这里 progressChan 需要手动释放，因为进度 routine 会一直占用它; taskChan 不用手动释放
+	close(progressChan)
+
+	return results, nil
+}
+
+
+func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	var wsMutex sync.Mutex // 全局互斥锁
+	// 升级 HTTP 连接为 WebSocket 连接
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("升级 WebSocket 失败: %v\n", err)
+		return
+	}
+	defer conn.Close()
+
+	// 创建一个 context 用于管理 Goroutine 生命周期
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 启动一个 Goroutine 定期检查 Key 状态
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				keyManager.CheckAndRecoverKeys()
+			case <-ctx.Done():
+				return // WebSocket 连接关闭时退出
+			}
+		}
+	}()
+
+	// 读取客户端消息
+	_, message, err := conn.ReadMessage()
+	if err != nil {
+		log.Printf("读取客户端消息失败: %v\n", err)
+		return
+	}
+
+	// 解析用户提示
+	var request struct {
+		UserPrompt string `json:"user_prompt"`
+	}
+	if err := json.Unmarshal(message, &request); err != nil {
+		log.Printf("解析用户提示失败: %v\n", err)
+		return
+	}
+
+	// 读取职位信息
+	positions, err := readPositions("./files/xian.csv")
+	if err != nil {
+		log.Printf("读取职位信息失败: %v\n", err)
+		return
+	}
+
+	// 将职位信息转换为 []interface{}
+	data := make([]interface{}, len(positions))
+	for i, position := range positions {
+		data[i] = position
+	}
+
+	// 定义任务函数
+	task := func(item interface{}) (interface{}, error) {
+		position := item.(string)
+
+		// 初始化 OpenAI 客户端
+		client, key, err := initClient()
+		if err != nil {
+			return nil, err
+		}
+
+		// 判别职位
+		result, err := judgePosition(client, position, request.UserPrompt)
+		if err != nil {
+			keyManager.ReportUnavailable(key) // 报告 Key 不可用
+			return nil, err
+		}
+		return result, err
+	}
+
+	// 定义进度函数
+	progress := func(processed int) error {
+		wsMutex.Lock()
+		defer wsMutex.Unlock()
+		total := len(data)
+		progress := processed * 100 / total
+		log.Printf("当前进度: %d%%\n", progress)
+
+		// 推送进度到客户端
+		progressMessage := map[string]interface{}{
+			"type":    "progress",
+			"message": progress,
+		}
+
+		if err := conn.WriteJSON(progressMessage); err != nil {
+			log.Printf("推送进度失败: %v\n", err)
+			return nil
+		}
+	}
+
+	// 并发处理任务
+	results, nil := ParallelTasks(data, 100, task, progress)
+
+	// 分类结果
+	qualified := make([]string, 0)
+	for i, result := range results {
+		switch result {
+		case "符合要求":
+			qualified = append(qualified, positions[i])
+		}
+	}
+	// 推送最终结果到客户端
+	finalResult := map[string]interface{}{
+		"type":      "result",
+		"qualified": qualified,
+	}
+
+	if err := conn.WriteJSON(finalResult); err != nil {
+		fmt.Printf("推送最终结果失败: %v\n", err)
+	}
+}
+
+func readPositions(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	positions := make([]string, 0)
+	for _, record := range records[1:] { // 跳过表头
+		positions = append(positions, strings.Join(record, ", "))
+	}
+	return positions, nil
+}
+
+func main() {
+	// 启动 WebSocket 服务器
+	http.HandleFunc("/ws", handleWebSocket)
+	log.Println("WebSocket 服务器启动，监听 :8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatalf("服务器启动失败: %v\n", err)
+	}
+}
