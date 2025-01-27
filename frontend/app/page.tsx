@@ -40,13 +40,16 @@ const ArrowUpIcon = ({ size = 16 }: { size?: number }) => {
   );
 };
 
-const SERVER_URL = "ws://localhost:8080/ws";
-// const SERVER_URL = "wss://func-ccba-whirddnmxd.cn-hangzhou.fcapp.run/ws"
+// const SERVER_URL = "ws://localhost:8080/ws";
+const SERVER_URL = "wss://func-ccba-whirddnmxd.cn-hangzhou.fcapp.run/ws"
 
 export default function MainPage() {
   const [api_key, setApiKey] = useInitializeApiKey(); // 初始化 API_KEY
   const [userPrompt, setUserPrompt] = useState("");
-  const [progress, setProgress] = useState(0);
+  const [progress, setProgress] = useState({
+    processed: 0,
+    total: 100
+  });
   const [result, setResult] = useState<string | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -57,9 +60,11 @@ export default function MainPage() {
       alert("请输入你的情况描述");
       return;
     }
-
+    if (api_key === ''){
+      setDialogOpen(true)
+      return
+    }
     setIsCalculating(true);
-    setProgress(1);
     setResult(null);
 
     const ws = new WebSocket(SERVER_URL);
@@ -71,7 +76,10 @@ export default function MainPage() {
     ws.onmessage = (event) => {
       const message = JSON.parse(event.data);
       if (message.type === "progress") {
-        setProgress((prevProgress) => Math.max(prevProgress, message.message));
+        setProgress({
+          processed: message.processed,
+          total: message.total
+        });
       } else if (message.type === "result") {
         setResult(message.qualified.join(""));
         setIsCalculating(false);
@@ -156,13 +164,13 @@ export default function MainPage() {
       <div className="w-full flex justify-center pt-[20px] md:pt-[30px]">
         <div className="relative w-[90%] md:w-[50%]">
           <Textarea
-            className="min-h-[220px] md:min-h-[150px] overflow-y-auto rounded-2xl !text-base bg-muted"
+            className="min-h-[220px]  overflow-y-auto rounded-2xl !text-base bg-muted"
             placeholder={
               `官方的岗位检索系统太过简陋，每个人情况不同，找到符合报名条件的岗位非常麻烦。
 
 不如让 AI 帮你，只需像下面这样描述一下, AI 自动过一遍所有岗位，智能匹配：
 
-如: "我2021年数学本科毕业，群众身份，要个佛山或者肇庆的岗位"`
+如: "我是汉语言文学的，想找长沙的岗位。但我不是应届生了，也不是党员，另外我也不想受到5年服务期限制。"`
             }
             value={userPrompt}
             onChange={(e) => setUserPrompt(e.target.value)}
@@ -180,9 +188,9 @@ export default function MainPage() {
 
       {isCalculating && (
         <div className="mt-8 text-center flex-grow-0 transition-opacity duration-300">
-          <div>进度</div>
-          <Progress value={progress} className="h-2 max-w-[90%] md:max-w-[800px] bg-gray-200 rounded-full mx-auto mt-2" />
-          <div className="mt-2 text-center">{progress}%</div>
+          <div>{`进度 ${Math.floor(progress.processed / progress.total * 100)}%`}</div>
+          <Progress value={Math.floor(progress.processed / progress.total * 100)} className="h-2 max-w-[90%] md:max-w-[800px] bg-gray-200 rounded-full mx-auto mt-2" />
+          <div className="mt-2 text-center">{`已处理 ${progress.processed}  总共 ${progress.total} 条数据`}</div>
         </div>
       )}
 
@@ -193,41 +201,50 @@ export default function MainPage() {
           </SyntaxHighlighter>
         </div>
       )}
-      <div className="font-semibold text-center text-xl pt-[100px]">常见问题</div>
+      <div className="font-bold text-center text-2xl pt-[100px]">常见问题</div>
       <Accordion type="single" collapsible className="max-w-[90%] md:max-w-[800px] mx-auto">
         <AccordionItem value="item-1">
-          <AccordionTrigger className="font-bold">这是免费的吗</AccordionTrigger>
-          <AccordionContent>
-            是的，我们不收钱。但我们依赖于 DeepSeek 公司的人工智能服务。该公司为每个用户都提供了一定的免费券，你之所以能免费使用，是因为我把自己的免费券拿出来给大家使用了。<br></br><br></br>
+          <AccordionTrigger className="font-bold text-xl">这是免费的吗</AccordionTrigger>
+          <AccordionContent className="text-base">
+            是的，我们不收钱。但我们依赖于 DeepSeek 公司的人工智能服务。该公司为每个用户都提供了一定的免费券，你之所以能免费使用，是因为<b>我把自己的免费券拿出来给大家使用了。</b> <br></br><br></br>
             
             但我的额度总有用完的一天，如果你在使用过程中看到弹窗让你粘贴一个 API Key，就意味着志愿者们的额度全都用完了。这时候需要你自己去注册申请一个 API key(免费的) 然后粘贴到这里来。 <br></br><br></br>
 
-            请注意，粘贴到这里之后，你的额度也会被所有人共享。但对你来说不亏，这个额度是 DeepSeek 公司送给你的，一毛钱都不用花。你不是程序员的话也用不上这个额度。
+            请注意，粘贴到这里之后，<b>你的额度也会被所有人共享。但对你来说不亏</b>，这个额度是 DeepSeek 公司送给你的，一毛钱都不用花。你不是程序员的话也用不上这个额度。
 
           </AccordionContent>
         </AccordionItem>
         <AccordionItem value="item-2">
-          <AccordionTrigger className="font-semibold">这个工具和《公考雷达》有什么区别</AccordionTrigger>
-          <AccordionContent>
-            1.根据你的条件筛选岗位，实际上是一件难以精确化的东西。 比方说你的专业是"马克思主义"，而某个岗位的专业要求是"文科类专业均可"。人脑觉得这个非常吻合，但由于这两句话没有任何一个字重合，所以机器是搜不出来的。 借助人工智能的力量可以避免这种漏选，因为它能理解人话。你也不希望因为这种问题错过某个岗位吧。<br></br><br></br>
+          <AccordionTrigger className="font-bold text-xl">这个工具和《公考雷达》有什么区别</AccordionTrigger>
+          <AccordionContent className="text-base">
+            1. <b>不会遗漏</b> <br></br><br></br>
+            
+            根据你的条件筛选岗位，实际上是一件难以精确化的东西。 比方说你的专业是"马克思主义"，而某个岗位的专业要求是"文科类专业均可"。<b>人脑觉得这个非常吻合，但由于这两句话没有任何一个字重合，所以机器是搜不出来的。</b> 借助人工智能的力量可以避免这种漏选，因为它能理解人话。<b>事关你的前途，你也不希望因为这种问题错过某个岗位吧。</b>  <br></br><br></br>
 
-            2.简洁。在机械式筛选器中，你要点好多个按钮描述各种问题。 有时候想了解多个地区的岗位，还得换着关键字搜好几次。  而在这里，你只需要用你的话描述清楚你的条件就可以了。
+            2.<b>简洁</b> <br></br><br></br> 在机械式筛选器中，你要点好多个按钮描述各种问题。 有时候想了解多个地区的岗位，还得换着关键字搜好几次。  而在这里，你只需要用你的话描述清楚你的条件就可以了。<br></br><br></br> 
+
           </AccordionContent>
         </AccordionItem>
         <AccordionItem value="item-3">
-          <AccordionTrigger className="font-semibold">加入考公交流群</AccordionTrigger>
-          <AccordionContent>
+          <AccordionTrigger className="font-bold text-xl">加入考公交流群</AccordionTrigger>
+          <AccordionContent className="text-base">
             后续我还会做更多 AI + 考公 + 事业编的便利软件。 请进群说一下你想要什么功能，我尽量满足。 同时群里也有很多同样考公的小伙伴，可以互相交流。<br></br><br></br>
           <Image src={'group.png'} alt="Group" width={200} height={200} className="mx-auto"></Image>
 
           </AccordionContent>
         </AccordionItem>
         <AccordionItem value="item-4">
-          <AccordionTrigger className="font-semibold">商务合作 / 开源</AccordionTrigger>
-          <AccordionContent>
+          <AccordionTrigger className="font-bold text-xl">商务合作 / 开源</AccordionTrigger>
+          <AccordionContent className="text-base">
             如果你是相关考公机构，见到这个网站，觉得还有点意思，想要集成在你们系统里，请联系微信<br></br><br></br> drinking-soda 或者直接加入上面的群聊 <br></br><br></br>
 
-            如果你是开发者，对这个项目感兴趣或者想讨论一下独立开发者经验/技术经验，也请加微信或进群。 源码会开放到 GitHub 上(先立个 Flag)。
+            如果你是开发者，对这个项目感兴趣或者想讨论一下独立开发者经验/技术经验，也请加微信或进群。 <br></br><br></br>
+
+            开源地址： https://github.com/washingtonbase/government-job-viewer 
+            
+            <br></br><br></br>
+
+            <b>禁止商用</b> 许可证用的是 AGPL，开源项目可以引用本项目的代码，但拿来卖钱须先征得我同意。
 
           </AccordionContent>
         </AccordionItem>
